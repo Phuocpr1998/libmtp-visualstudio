@@ -63,15 +63,7 @@ int use_mtpz;
 #include <windows.h>
 void usleep(__int64 usec)
 {
-	HANDLE timer;
-	LARGE_INTEGER ft;
-
-	ft.QuadPart = -(10 * usec); // Convert to 100 nanosecond interval, negative value indicates relative time
-
-	timer = CreateWaitableTimer(NULL, TRUE, NULL);
-	SetWaitableTimer(timer, &ft, 0, NULL, NULL, 0);
-	WaitForSingleObject(timer, INFINITE);
-	CloseHandle(timer);
+	Sleep(usec / 1000);
 }
 #else
 #include <unistd.h>
@@ -2115,10 +2107,10 @@ LIBMTP_mtpdevice_t *LIBMTP_Open_Raw_Device_Uncached(LIBMTP_raw_device_t *rawdevi
   /* Set initial storage information */
   mtp_device->storage = NULL;
   if (LIBMTP_Get_Storage(mtp_device, LIBMTP_STORAGE_SORTBY_NOTSORTED) == -1) {
-    add_error_to_errorstack(mtp_device,
-			    LIBMTP_ERROR_GENERAL,
-			    "Get Storage information failed.");
-    mtp_device->storage = NULL;
+	  add_error_to_errorstack(mtp_device,
+		  LIBMTP_ERROR_GENERAL,
+		  "Get Storage information failed.");
+	  mtp_device->storage = NULL;
   }
 
 

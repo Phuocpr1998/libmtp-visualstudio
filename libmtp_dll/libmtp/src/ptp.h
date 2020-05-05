@@ -2915,9 +2915,17 @@ uint16_t ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
                 uint16_t flags, uint64_t sendlen,
                 PTPDataHandler *handler
 );
+uint16_t ptp_transaction_new2(PTPParams* params, PTPContainer* ptp,
+	uint16_t flags, uint64_t sendlen,
+	PTPDataHandler *handler
+);
 uint16_t ptp_transaction (PTPParams* params, PTPContainer* ptp,
                 uint16_t flags, uint64_t sendlen,
                 unsigned char **data, unsigned int *recvlen
+);
+uint16_t ptp_transaction_2new(PTPParams* params, PTPContainer* ptp,
+	uint16_t flags, uint64_t sendlen,
+	unsigned char **data, unsigned int *recvlen
 );
 
 /**

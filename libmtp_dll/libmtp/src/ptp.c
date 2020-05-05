@@ -189,9 +189,9 @@ ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
 	case PTP_DP_GETDATA:
 		{
 			uint16_t ret = params->getdata_func(params, ptp, handler);
-			// if (ret == PTP_ERROR_IO) { // hotfix camera gopro hero 7 black
-			// 	ret = params->getdata_func(params, ptp, handler);
-			// }
+			 if (ret == PTP_ERROR_IO) { // hotfix camera gopro hero 7 black
+			 	ret = params->getdata_func(params, ptp, handler);
+			 }
 			if (ret == PTP_ERROR_CANCEL)
 				CHECK_PTP_RC(params->cancelreq_func(params, params->transaction_id-1));
 			CHECK_PTP_RC(ret);
@@ -232,6 +232,82 @@ ptp_transaction_new (PTPParams* params, PTPContainer* ptp,
 			ptp_error (params,
 				"PTP: Sequence number mismatch %d vs expected %d.",
 				ptp->Transaction_ID, params->transaction_id-1
+			);
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+			return PTP_ERROR_BADPARAM;
+#endif
+		}
+		break;
+	}
+	return ptp->Code;
+}
+
+uint16_t ptp_transaction_new2(PTPParams * params, PTPContainer * ptp, uint16_t flags, uint64_t sendlen, PTPDataHandler * handler)
+{
+	int 		tries;
+	uint16_t	cmd;
+
+	if ((params == NULL) || (ptp == NULL))
+		return PTP_ERROR_BADPARAM;
+
+	cmd = ptp->Code;
+	ptp->Transaction_ID = params->transaction_id++;
+	ptp->SessionID = params->session_id;
+	/* send request */
+	CHECK_PTP_RC(params->sendreq_func(params, ptp, flags));
+	/* is there a dataphase? */
+	switch (flags&PTP_DP_DATA_MASK) {
+	case PTP_DP_SENDDATA:
+	{
+		uint16_t ret = params->senddata_func(params, ptp, sendlen, handler);
+		if (ret == PTP_ERROR_CANCEL)
+			CHECK_PTP_RC(params->cancelreq_func(params, params->transaction_id - 1));
+		CHECK_PTP_RC(ret);
+	}
+	break;
+	case PTP_DP_GETDATA:
+	{
+		uint16_t ret = params->getdata_func(params, ptp, handler);
+		if (ret == PTP_ERROR_CANCEL)
+			CHECK_PTP_RC(params->cancelreq_func(params, params->transaction_id - 1));
+		CHECK_PTP_RC(ret);
+	}
+	break;
+	case PTP_DP_NODATA:
+		break;
+	default:
+		return PTP_ERROR_BADPARAM;
+	}
+	tries = 3;
+	while (tries--) {
+		uint16_t ret;
+		/* get response */
+		ret = params->getresp_func(params, ptp);
+		if (ret == PTP_ERROR_RESP_EXPECTED) {
+			ptp_debug(params, "PTP: response expected but not got, retrying.");
+			tries++;
+			continue;
+		}
+		CHECK_PTP_RC(ret);
+
+		if (ptp->Transaction_ID < params->transaction_id - 1) {
+			/* The Leica uses Transaction ID 0 on result from CloseSession. */
+			if (cmd == PTP_OC_CloseSession)
+				break;
+			tries++;
+			ptp_debug(params,
+				"PTP: Sequence number mismatch %d vs expected %d, suspecting old reply.",
+				ptp->Transaction_ID, params->transaction_id - 1
+			);
+			continue;
+		}
+		if (ptp->Transaction_ID != params->transaction_id - 1) {
+			/* try to clean up potential left overs from previous session */
+			if ((cmd == PTP_OC_OpenSession) && tries)
+				continue;
+			ptp_error(params,
+				"PTP: Sequence number mismatch %d vs expected %d.",
+				ptp->Transaction_ID, params->transaction_id - 1
 			);
 #ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 			return PTP_ERROR_BADPARAM;
@@ -437,6 +513,49 @@ ptp_transaction (PTPParams* params, PTPContainer* ptp,
 	case PTP_DP_GETDATA: {
 		unsigned long len;
 		ptp_exit_recv_memory_handler (&handler, data, &len);
+		if (ret != PTP_RC_OK) {
+			len = 0;
+			free(*data);
+			*data = NULL;
+		}
+		if (recvlen)
+			*recvlen = len;
+		break;
+	}
+	default:break;
+	}
+	return ret;
+}
+
+uint16_t ptp_transaction_2new(PTPParams * params, PTPContainer * ptp, uint16_t flags, uint64_t sendlen, unsigned char ** data, unsigned int * recvlen)
+{
+	PTPDataHandler	handler;
+	uint16_t	ret;
+
+	switch (flags & PTP_DP_DATA_MASK) {
+	case PTP_DP_SENDDATA:
+		if (!data)
+			return PTP_ERROR_BADPARAM;
+		CHECK_PTP_RC(ptp_init_send_memory_handler(&handler, *data, sendlen));
+		break;
+	case PTP_DP_GETDATA:
+		if (!data)
+			return PTP_ERROR_BADPARAM;
+		*data = NULL;
+		if (recvlen)
+			*recvlen = 0;
+		CHECK_PTP_RC(ptp_init_recv_memory_handler(&handler));
+		break;
+	default:break;
+	}
+	ret = ptp_transaction_new2(params, ptp, flags, sendlen, &handler);
+	switch (flags & PTP_DP_DATA_MASK) {
+	case PTP_DP_SENDDATA:
+		ptp_exit_send_memory_handler(&handler);
+		break;
+	case PTP_DP_GETDATA: {
+		unsigned long len;
+		ptp_exit_recv_memory_handler(&handler, data, &len);
 		if (ret != PTP_RC_OK) {
 			len = 0;
 			free(*data);
@@ -4460,7 +4579,7 @@ ptp_mtp_getobjectproplist_generic (PTPParams* params, uint32_t handle, uint32_t 
 	unsigned int	size;
 
 	PTP_CNT_INIT(ptp, PTP_OC_MTP_GetObjPropList, handle, formats, properties, propertygroups, level);
-	CHECK_PTP_RC(ptp_transaction(params, &ptp, PTP_DP_GETDATA, 0, &data, &size));
+	CHECK_PTP_RC(ptp_transaction_2new(params, &ptp, PTP_DP_GETDATA, 0, &data, &size));
 	*nrofprops = ptp_unpack_OPL(params, data, props, size);
 	free(data);
 	return PTP_RC_OK;
