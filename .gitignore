@@ -4,4 +4,5 @@ Release/
 x64/
 libmtp_dll/Debug/
 libmtp_dll/Release/
+libmtp_dll/ReleaseDll/
 libmtp_dll/x64/
